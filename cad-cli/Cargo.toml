@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 cad-geometry = { path = "../cad-geometry"}
 clap = { version = "4", features = ["env", "derive"] }
+tokio.workspace = true

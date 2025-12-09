@@ -21,6 +21,6 @@ impl Display for FigureType {
     }
 }
 
-pub trait Figure: ToArea {
+pub trait Figure: ToArea + Send + Sync {
     fn figure_type(&self) -> FigureType;
 }

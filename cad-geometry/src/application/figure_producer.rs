@@ -1,24 +1,57 @@
+use std::sync::Arc;
+
+use futures::future::join_all;
 use rand::Rng;
+use tokio::sync::Mutex;
 
-use crate::figures::{Circle, Figure};
+use crate::figures::{Circle, Figure, Rectangle};
 
-pub struct GeometricFigureProducer {}
+pub struct GeometricFigureProducer {
+    distribution: f64,
+}
 
 impl GeometricFigureProducer {
     pub fn new() -> Self {
-        Self {}
+        Self { distribution: 0.5 }
     }
 
-    pub fn produce(&self, amount: u32) -> Vec<Box<dyn Figure>> {
-        let mut rng = rand::rng();
-
-        let mut items: Vec<Box<dyn Figure>> = Vec::with_capacity(amount as usize);
+    pub fn produce(&self, amount: u32) -> Vec<Arc<dyn Figure>> {
+        let mut items: Vec<Arc<dyn Figure>> = Vec::with_capacity(amount as usize);
 
         for _n in 0..amount {
-            let circle = Box::new(Circle::new(rng.random_range(0.0..1e6)));
+            let circle = build_random_figure(self.distribution);
             items.push(circle);
         }
 
         items
+    }
+
+    pub async fn produce_async(&self, amount: u32) -> Vec<Arc<dyn Figure>> {
+        let mut futs = Vec::with_capacity(amount as usize);
+
+        for _n in 0..amount {
+            let distribution = self.distribution;
+
+            let fut = async move { build_random_figure(distribution) };
+
+            futs.push(fut);
+        }
+
+        let result = join_all(futs).await;
+
+        result
+    }
+}
+
+fn build_random_figure(distribution: f64) -> Arc<dyn Figure> {
+    let mut rng = rand::rng();
+
+    if rng.random_bool(distribution) {
+        Arc::new(Circle::new(rng.random_range(0.0..1e6)))
+    } else {
+        Arc::new(Rectangle::new(
+            rng.random_range(0.0..1e6),
+            rng.random_range(0.0..1e6),
+        ))
     }
 }

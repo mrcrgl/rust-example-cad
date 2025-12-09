@@ -12,4 +12,8 @@ pub enum CliCommand {
         #[arg(short, long)]
         amount: u32,
     },
+    ProduceAreasAsync {
+        #[arg(short, long)]
+        amount: u32,
+    },
 }
