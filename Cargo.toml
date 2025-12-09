@@ -1,0 +1,2 @@
+[workspace]
+members = ["cad-cli","cad-geometry"]
