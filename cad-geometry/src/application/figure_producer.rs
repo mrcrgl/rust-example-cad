@@ -2,12 +2,17 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use rand::Rng;
-use tokio::sync::Mutex;
 
 use crate::figures::{Circle, Figure, Rectangle};
 
 pub struct GeometricFigureProducer {
     distribution: f64,
+}
+
+impl Default for GeometricFigureProducer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GeometricFigureProducer {
@@ -37,9 +42,7 @@ impl GeometricFigureProducer {
             futs.push(fut);
         }
 
-        let result = join_all(futs).await;
-
-        result
+        join_all(futs).await
     }
 }
 
