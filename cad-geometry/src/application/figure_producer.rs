@@ -31,6 +31,14 @@ impl GeometricFigureProducer {
         items
     }
 
+    pub fn produce_circles(&self, amount: u32) -> Vec<Circle> {
+        let mut items = Vec::with_capacity(amount as usize);
+        for _ in 0..amount {
+            items.push(build_random_circle());
+        }
+        items
+    }
+
     pub async fn produce_async(&self, amount: u32) -> Vec<Arc<dyn Figure>> {
         let mut futs = Vec::with_capacity(amount as usize);
 
@@ -50,11 +58,18 @@ fn build_random_figure(distribution: f64) -> Arc<dyn Figure> {
     let mut rng = rand::rng();
 
     if rng.random_bool(distribution) {
-        Arc::new(Circle::new(rng.random_range(0.0..1e6)))
+        Arc::new(build_random_circle())
     } else {
-        Arc::new(Rectangle::new(
-            rng.random_range(0.0..1e6),
-            rng.random_range(0.0..1e6),
-        ))
+        Arc::new(build_random_rectangle())
     }
+}
+
+fn build_random_circle() -> Circle {
+    let mut rng = rand::rng();
+    Circle::new(rng.random_range(0.0..1e6))
+}
+
+fn build_random_rectangle() -> Rectangle {
+    let mut rng = rand::rng();
+    Rectangle::new(rng.random_range(0.0..1e6), rng.random_range(0.0..1e6))
 }

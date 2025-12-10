@@ -9,11 +9,18 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     ProduceAreas {
-        #[arg(short, long)]
+        #[arg(short, long, default_value_t = 1)]
         amount: u32,
     },
     ProduceAreasAsync {
-        #[arg(short, long)]
+        #[arg(short, long, default_value_t = 1)]
         amount: u32,
+    },
+    ProduceCircles {
+        #[arg(short, long, default_value_t = 1)]
+        amount: u32,
+
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }

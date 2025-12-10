@@ -22,7 +22,12 @@ impl Figure for Rectangle {
 }
 
 impl ToArea for Rectangle {
-    fn to_area(&self) -> f32 {
-        self.height * self.width
+    fn to_area(&self) -> Option<f32> {
+        let area = self.height * self.width;
+        if area == f32::INFINITY {
+            None
+        } else {
+            Some(area)
+        }
     }
 }
