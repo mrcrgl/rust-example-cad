@@ -160,6 +160,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "cad-geometry",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
