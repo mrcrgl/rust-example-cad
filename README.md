@@ -1,66 +1,100 @@
 # Rust CAD Mini-Workspace
 
-An educational Rust workspace that explores fundamental language concepts and gradually introduces asynchronous programming with Tokio and shared, mutable state. The project is intentionally small and focused so you can learn by reading and extending real code.
+An educational Rust workspace that explores fundamental language concepts and gradually introduces asynchronous programming with Tokio, shared mutable state, and a small REST API powered by Axum. The project is intentionally small and focused so you can learn by reading and extending real code.
 
 ## Learning goals
 
-- Understand basic Rust project structure with a Cargo workspace
-- Work with modules, visibility, traits, and dynamic dispatch (`Box<dyn Trait>`)
-- Use external crates (`clap` for CLI, `rand` for randomness)
+- Understand basic Rust project structure with a Cargo workspace (multi-crate)
+- Work with modules, visibility, traits, and dynamic dispatch (`Arc<dyn Trait>`)
+- Use external crates (`clap` for CLI, `rand` for randomness, `tokio` for async, `axum` for HTTP, `serde`/`serde_json` for JSON, `tracing` for diagnostics)
 - Implement domain types, traits, and separation of concerns across crates
-- Prepare for asynchronous programming with Tokio
+- Write asynchronous Rust with Tokio and spawn tasks safely
 - Safely share mutable state across tasks with `Arc<Mutex<T>>` and `Arc<RwLock<T>>`
+- Build a small REST API server and return typed JSON responses
 
 ## Project structure
 
 Workspace layout:
 ~~~
 rust-202512-2/
-├─ Cargo.toml          # Workspace definition
-├─ cad-geometry/       # Library crate: core geometry domain
+├─ Cargo.toml                 # Workspace definition + shared dependencies
+├─ cad-geometry/              # Library crate: core geometry domain
 │  ├─ Cargo.toml
 │  └─ src/
 │     ├─ lib.rs
-│     ├─ area.rs       # `ToArea` trait
-│     ├─ figures/      # Shapes + traits
+│     ├─ area.rs              # `ToArea` trait
+│     ├─ figures/             # Shapes + traits
 │     │  ├─ mod.rs
-│     │  ├─ figure.rs  # `Figure` trait + `FigureType`
+│     │  ├─ figure.rs         # `Figure` trait (+Send+Sync) + `FigureType`
 │     │  ├─ circle.rs
 │     │  └─ rectangle.rs
 │     └─ application/
 │        ├─ mod.rs
-│        └─ figure_producer.rs  # Produces random figures (currently circles)
-└─ cad-cli/            # Binary crate: command-line app
+│        └─ figure_producer.rs # Produces random figures (sync + async)
+├─ cad-cli/                   # Binary crate: command-line app
+│  ├─ Cargo.toml
+│  └─ src/
+│     ├─ main.rs              # Async entrypoint (`#[tokio::main]`)
+│     ├─ cli.rs               # `clap`-powered CLI definitions
+│     ├─ command.rs           # Command routing + timing
+│     ├─ error.rs             # CLI error types + exit codes
+│     └─ command/
+│        ├─ produce_areas.rs  # sync + async area production
+│        └─ produce_circles.rs# circle generator w/ optional JSON output
+└─ cad-rest/                  # Binary crate: Axum REST server
    ├─ Cargo.toml
    └─ src/
-      ├─ main.rs       # Entry point
-      ├─ cli.rs        # `clap`-powered CLI definitions
-      ├─ command.rs    # Command routing
-      └─ command/
-         └─ produce_areas.rs
+      ├─ main.rs              # Server bootstrap, tracing, app state
+      ├─ services.rs          # Routes/handlers (`/api/get_circle`)
+      └─ error.rs             # Error -> HTTP response mapping
 ~~~
+
+Workspace-level dependencies (example):
+- `tokio`, `serde`, `serde_json`, and `tracing` are declared at the workspace level and used from member crates to keep versions consistent.
 
 ### Crate: `cad-geometry` (library)
 - `area::ToArea`: A trait to compute the area for geometric shapes.
-- `figures::Figure` and `figures::FigureType`: A trait and enum that categorize and display figure types. Shapes implement `Figure` and `ToArea`.
+- `figures::Figure` and `figures::FigureType`: A trait and enum that categorize and display figure types. Shapes implement `Figure` and `ToArea`. The `Figure` trait is `Send + Sync` to support concurrency.
 - Shapes:
   - `figures::circle::Circle`
   - `figures::rectangle::Rectangle`
-- `application::figure_producer::GeometricFigureProducer`: Produces a `Vec<Box<dyn Figure>>` using the `rand` crate. Currently generates circles with random radii to demonstrate dynamic dispatch and trait objects.
+- `application::figure_producer::GeometricFigureProducer`:
+  - `produce(amount) -> Vec<Arc<dyn Figure>>` returns trait objects behind `Arc` to enable sharing across async tasks.
+  - `produce_async(amount) -> Vec<Arc<dyn Figure>>` builds items concurrently and awaits them via `futures::future::join_all`.
+  - `produce_circles(amount) -> Vec<Circle>` returns concrete `Circle` values (used by the REST endpoint).
 
 Key Rust concepts:
 - Traits and trait bounds
-- Dynamic dispatch via `Box<dyn Figure>`
+- Dynamic dispatch via `Arc<dyn Figure>`
 - Module organization and re-exports (`pub use`)
 - Crate boundaries and reuse across a workspace
+- Async fan-out/fan-in using `join_all`
 
 ### Crate: `cad-cli` (binary)
-- Uses `clap` to define a small CLI.
-- Subcommand: `produce-areas --amount <N>`
+- Async CLI using `#[tokio::main]`.
+- Subcommands:
+  - `produce-areas --amount <N>`: synchronous generation and printing of figure areas.
+  - `produce-areas-async --amount <N>`: asynchronous generation using the async producer.
+  - `produce-circles --amount <N> [--json]`: generate `N` circles; print radii or pretty JSON with `--json`.
 - Workflow:
   1. Parse CLI args via `clap`.
-  2. Call into the `cad-geometry` library (`GeometricFigureProducer`) to produce figures.
-  3. Print each figure’s type and area.
+  2. Call into `cad-geometry` (`GeometricFigureProducer`) to produce figures or circles.
+  3. Print each figure’s type and area (or serialize to JSON).
+  4. Print elapsed time (simple performance feedback).
+
+### Crate: `cad-rest` (binary, Axum server)
+- Async HTTP server using `axum` + `tokio`, with `tracing` diagnostics.
+- App state:
+  - `AppState { producer: Arc<GeometricFigureProducer>, is_online: bool }`
+- Routes:
+  - `GET /api/get_circle?amount=N` → JSON `[Circle, ...]`
+    - Default `amount=1`
+    - Validates `amount <= 1000`, otherwise returns `400` with a JSON error payload
+- Error handling:
+  - Custom `ApiError` implements `IntoResponse`, mapping domain errors to HTTP responses and JSON bodies.
+- Run configuration:
+  - Binds to `127.0.0.1:1337`
+  - `RUST_LOG`/`tracing_subscriber` env filter supported (e.g., `RUST_LOG=info`)
 
 ## Getting started
 
@@ -76,46 +110,73 @@ cargo build
 
 Run the CLI:
 ~~~sh
-# Produce 5 random figures and print their areas
+# Produce 5 random figures and print their areas (sync)
 cargo run -p cad-cli -- produce-areas --amount 5
+
+# Produce 5 random figures using the async producer
+cargo run -p cad-cli -- produce-areas-async --amount 5
+
+# Produce 3 circles, pretty-printed JSON
+cargo run -p cad-cli -- produce-circles --amount 3 --json
 ~~~
 
-Expected output (example):
-~~~
-todo produce 5 areas
-circle(31415.927)
-circle(7853.981)
-circle(1.256)
-...
+Run the REST server:
+~~~sh
+# Start the server (listens on 127.0.0.1:1337)
+RUST_LOG=info cargo run -p cad-rest
 ~~~
 
-Note: The first line is a placeholder message printed by the current implementation; you can safely remove or update it as you evolve the command.
+Call the endpoint:
+~~~sh
+# Get one circle
+curl -s http://127.0.0.1:1337/api/get_circle | jq .
+
+# Get 5 circles
+curl -s "http://127.0.0.1:1337/api/get_circle?amount=5" | jq .
+~~~
 
 ## What’s covered so far
 
-- Cargo workspace with a library crate (`cad-geometry`) and a binary crate (`cad-cli`)
-- CLI parsing with `clap`
-- Traits (`ToArea`, `Figure`), trait objects (`Box<dyn Figure>`), and dynamic dispatch
+- Cargo workspace with a library crate (`cad-geometry`) and two binary crates (`cad-cli`, `cad-rest`)
+- Workspace-level dependency management (`tokio`, `serde`, `serde_json`, `tracing`)
+- CLI parsing with `clap` and an async `main`
+- Traits (`ToArea`, `Figure`), trait objects behind `Arc<dyn Figure>`, and dynamic dispatch
 - Shape implementations (`Circle`, `Rectangle`)
-- Simple “application service” that returns abstracted domain objects
 - Random value generation with `rand`
+- Async figure production via `join_all`
+- Axum REST server with:
+  - Typed state (`AppState`) and shared components (`Arc<...>`)
+  - Query parameter extraction and validation
+  - JSON responses with `serde`
+  - Error handling via `thiserror` + `IntoResponse`
+  - Structured logging with `tracing` + `tracing-subscriber`
 
-## Roadmap: introducing Tokio and shared mutable state
+## Roadmap: shared mutable state and async patterns
 
-We will extend the CLI and library to demonstrate async programming with Tokio and safe shared state patterns.
+We will extend the CLI and REST server to demonstrate additional async and shared-state patterns.
 
 Planned additions:
-1. Add `tokio` as a dependency to `cad-cli`.
-2. Convert `main` into an async entrypoint (e.g., `#[tokio::main] async fn main() { ... }`).
-3. Introduce concurrent tasks that:
-   - Generate figures concurrently
-   - Compute areas concurrently
-4. Aggregate results from tasks using shared mutable state guarded by:
-   - `Arc<Mutex<Vec<f32>>>` (exclusive lock) or
-   - `Arc<RwLock<Vec<f32>>>` (read/write lock)
-5. Add a new CLI subcommand (e.g., `produce-areas-async`) to compare synchronous vs asynchronous approaches.
+1. Compare shared-state aggregation patterns:
+   - `Arc<Mutex<Vec<f32>>>` vs `Arc<RwLock<Vec<f32>>>` for concurrent writers/readers
+   - Channel-based pipelines (`tokio::sync::mpsc`) to reduce lock contention
+2. Add metrics/state to the server:
+   - Track request counts, last N generated radii, min/max/avg, etc.
+   - Expose `/api/stats` that reads shared state under a read lock
+3. Explore graceful shutdown and task management:
+   - Use `tokio::select!` with shutdown signals
+   - Structured errors (`anyhow`/`thiserror`) in async contexts
+4. Add tests:
+   - Unit tests for shape areas
+   - Integration tests for the REST API (spawn server on a random port)
 
-Sketch of upcoming patterns:
+Sketches:
+
+- Shared aggregation with `Arc<Mutex<T>>`:
+~~~rust
+use std::sync::{Arc, Mutex};
+let areas = Arc::new(Mutex::new(Vec::new()));
+// move `areas.clone()` into tasks; lock, push results
+~~~
 
 - Async entrypoint and task spawning:
 ~~~rust
@@ -127,38 +188,24 @@ async fn main() {
 }
 ~~~
 
-- Shared aggregation with `Arc<Mutex<T>>`:
-~~~rust
-use std::sync::{Arc, Mutex};
-let areas = Arc::new(Mutex::new(Vec::new()));
-// move `areas.clone()` into tasks; lock, push results
-~~~
-
-- For read-mostly scenarios, prefer `Arc<RwLock<T>>` to allow concurrent reads.
-
-- Consider channels (`tokio::sync::mpsc`) to decouple producers and consumers without sharing a collection directly.
-
-Discussion points we’ll cover:
-- When async helps (I/O-bound, high-concurrency tasks) vs when it’s unnecessary (pure CPU-bound workloads without I/O)
-- Minimizing lock contention and avoiding deadlocks
-- Choosing between channels and shared state
-- Error handling in async contexts (`anyhow`, `thiserror`), and graceful task shutdown
-
 ## Suggested exercises
 
 - Library:
-  - Implement `ToArea` for `Rectangle` and update the producer to generate both circles and rectangles.
-  - Add a new shape (e.g., `Triangle`) and wire it through `FigureType`.
+  - Add `Triangle` and wire through `FigureType`.
   - Implement `Display` for shapes to print dimensions nicely.
 
 - CLI:
-  - Add a `--shape` filter or ratio flags (e.g., `--circle-weight 70 --rectangle-weight 30`).
-  - Add `--min-radius` / `--max-radius` bounds for circles, with validation.
+  - Add `--shape` filters or ratios (e.g., `--circle-weight 70 --rectangle-weight 30`).
+  - Add bounds for random generation (e.g., `--min-radius` / `--max-radius`) with validation.
 
 - Async and shared state:
-  - Add `produce-areas-async` subcommand using Tokio tasks.
-  - Aggregate areas with `Arc<Mutex<Vec<f32>>>` and print summary stats (count, min, max, average).
+  - Extend `produce-areas-async` to aggregate stats with `Arc<Mutex<_>>` and print count/min/max/avg.
   - Replace the mutex with a channel-based pipeline and compare performance/complexity.
+
+- REST:
+  - Add `/api/get_rectangle` and `/api/stats`.
+  - Validate params and return structured `ApiError`s.
+  - Add tracing spans/fields per request.
 
 - Testing and quality:
   - Add unit tests for `to_area` implementations.
@@ -170,6 +217,7 @@ Discussion points we’ll cover:
 - Prefer traits to decouple generation and consumption of domain objects.
 - Keep the CLI thin; put logic into the library to make it testable and reusable.
 - When introducing async, isolate blocking work (e.g., heavy CPU tasks) to avoid stalling the executor, or use `spawn_blocking` if appropriate.
+- Use `Arc<Mutex<_>>` for simple shared writes; consider channels to avoid holding locks during work.
 - Start simple: get correctness first, then iterate toward concurrency and shared state.
 
 ## License
