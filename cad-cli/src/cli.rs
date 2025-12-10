@@ -6,6 +6,7 @@ pub struct Cli {
     pub command: Option<CliCommand>,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     ProduceAreas {
